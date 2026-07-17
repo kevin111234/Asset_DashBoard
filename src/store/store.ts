@@ -4,11 +4,23 @@ import { v4 as uuid } from 'uuid';
 import type { Asset, CashFlowItem, Loan, Scenario, ScenarioSettings, TransferItem } from '../types';
 import { buildSeedScenario } from './seed';
 
+const DEFAULT_NEW_SCENARIO_SETTINGS: ScenarioSettings = {
+  baseCurrency: 'KRW',
+  startMonth: new Date().toISOString().slice(0, 7),
+  forecastMonths: 36,
+  monthlyEssentialLiving: 700_000,
+  livingReserveMonths: 3,
+  emergencyFund: 1_000_000,
+  shortTermExpenseMonths: 3,
+  investmentAllocationRate: 0.5,
+};
+
 interface DashboardState {
   scenarios: Scenario[];
   activeScenarioId: string;
 
   setActiveScenario: (id: string) => void;
+  createScenario: (name: string, settings?: Partial<ScenarioSettings>) => string;
   cloneScenario: (id: string, newName: string) => string;
   renameScenario: (id: string, name: string) => void;
   deleteScenario: (id: string) => void;
@@ -48,6 +60,23 @@ export const useDashboardStore = create<DashboardState>()(
       activeScenarioId: 'scenario-base',
 
       setActiveScenario: (id) => set({ activeScenarioId: id }),
+
+      createScenario: (name, settings) => {
+        const newId = uuid();
+        const scenario: Scenario = {
+          id: newId,
+          name,
+          isDefault: false,
+          createdAt: new Date().toISOString(),
+          settings: { ...DEFAULT_NEW_SCENARIO_SETTINGS, ...settings },
+          assets: [],
+          cashFlows: [],
+          transfers: [],
+          loans: [],
+        };
+        set((state) => ({ scenarios: [...state.scenarios, scenario] }));
+        return newId;
+      },
 
       cloneScenario: (id, newName) => {
         const src = get().scenarios.find((s) => s.id === id);

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import {
   ResponsiveContainer,
   LineChart,
@@ -13,21 +13,39 @@ import { useDashboardStore } from '../store/store';
 import { simulateScenario } from '../engine/engine';
 import { formatWon, formatManwon } from '../lib/format';
 import { formatYmKorean } from '../engine/month';
-import { Button, TextInput } from '../components/inputs';
+import { Button, Field, TextInput } from '../components/inputs';
+import ScenarioSettingsForm from '../components/ScenarioSettingsForm';
+import type { ScenarioSettings } from '../types';
 
 export default function ScenariosSection() {
   const scenarios = useDashboardStore((s) => s.scenarios);
   const activeScenarioId = useDashboardStore((s) => s.activeScenarioId);
   const setActiveScenario = useDashboardStore((s) => s.setActiveScenario);
+  const createScenario = useDashboardStore((s) => s.createScenario);
   const cloneScenario = useDashboardStore((s) => s.cloneScenario);
   const renameScenario = useDashboardStore((s) => s.renameScenario);
   const deleteScenario = useDashboardStore((s) => s.deleteScenario);
   const setDefaultScenario = useDashboardStore((s) => s.setDefaultScenario);
+  const updateSettings = useDashboardStore((s) => s.updateSettings);
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [cloneSourceId, setCloneSourceId] = useState<string | null>(null);
   const [cloneName, setCloneName] = useState('');
+  const [settingsEditId, setSettingsEditId] = useState<string | null>(null);
+
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createSettings, setCreateSettings] = useState<ScenarioSettings>({
+    baseCurrency: 'KRW',
+    startMonth: new Date().toISOString().slice(0, 7),
+    forecastMonths: 36,
+    monthlyEssentialLiving: 700_000,
+    livingReserveMonths: 3,
+    emergencyFund: 1_000_000,
+    shortTermExpenseMonths: 3,
+    investmentAllocationRate: 0.5,
+  });
 
   const [compareA, setCompareA] = useState<string>(activeScenarioId);
   const [compareB, setCompareB] = useState<string>(scenarios.find((s) => s.id !== activeScenarioId)?.id ?? activeScenarioId);
@@ -53,6 +71,7 @@ export default function ScenariosSection() {
   function startClone(id: string, currentName: string) {
     setCloneSourceId(id);
     setCloneName(`${currentName} 복제본`);
+    setShowCreateForm(false);
   }
 
   function confirmClone() {
@@ -63,12 +82,48 @@ export default function ScenariosSection() {
     setActiveScenario(newId);
   }
 
+  function confirmCreate() {
+    if (!createName.trim()) return;
+    const newId = createScenario(createName.trim(), createSettings);
+    setShowCreateForm(false);
+    setCreateName('');
+    setActiveScenario(newId);
+  }
+
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">시나리오 관리</h2>
-        <p className="text-xs text-gray-500 dark:text-gray-400">동일한 원본 데이터를 기반으로 여러 재무 계획을 저장하고 비교합니다.</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">시나리오 관리</h2>
+          <p className="text-xs text-gray-500 dark:text-gray-400">동일한 원본 데이터를 기반으로 여러 재무 계획을 저장하고 비교합니다.</p>
+        </div>
+        <Button
+          onClick={() => {
+            setShowCreateForm(true);
+            setCloneSourceId(null);
+          }}
+        >
+          새 시나리오 만들기
+        </Button>
       </div>
+
+      {showCreateForm && (
+        <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <Field label="시나리오 이름">
+            <TextInput value={createName} onChange={setCreateName} placeholder="예: 보증금 대출 없이" />
+          </Field>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            빈 시나리오로 시작합니다. 만든 뒤 자산·현금흐름·저축투자·대출 탭에서 항목을 추가하세요.
+          </p>
+          <ScenarioSettingsForm value={createSettings} onChange={(patch) => setCreateSettings({ ...createSettings, ...patch })} />
+          <div className="flex gap-2">
+            <Button onClick={confirmCreate}>만들기</Button>
+            <Button variant="secondary" onClick={() => setShowCreateForm(false)}>
+              취소
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <table className="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
@@ -83,7 +138,8 @@ export default function ScenariosSection() {
           </thead>
           <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
             {scenarios.map((s) => (
-              <tr key={s.id} className={s.id === activeScenarioId ? 'bg-indigo-50/60 dark:bg-indigo-900/10' : ''}>
+              <Fragment key={s.id}>
+              <tr className={s.id === activeScenarioId ? 'bg-indigo-50/60 dark:bg-indigo-900/10' : ''}>
                 <td className="px-3 py-2 font-medium text-gray-800 dark:text-gray-200">
                   {renamingId === s.id ? (
                     <div className="flex gap-2">
@@ -121,6 +177,12 @@ export default function ScenariosSection() {
                     <button onClick={() => startClone(s.id, s.name)} className="text-gray-600 hover:underline dark:text-gray-400">
                       복제
                     </button>
+                    <button
+                      onClick={() => setSettingsEditId(settingsEditId === s.id ? null : s.id)}
+                      className="text-gray-600 hover:underline dark:text-gray-400"
+                    >
+                      설정
+                    </button>
                     {!s.isDefault && (
                       <button onClick={() => setDefaultScenario(s.id)} className="text-gray-600 hover:underline dark:text-gray-400">
                         기본으로 지정
@@ -134,6 +196,19 @@ export default function ScenariosSection() {
                   </div>
                 </td>
               </tr>
+              {settingsEditId === s.id && (
+                <tr>
+                  <td colSpan={5} className="bg-gray-50 px-3 py-3 dark:bg-gray-800/40">
+                    <ScenarioSettingsForm value={s.settings} onChange={(patch) => updateSettings(s.id, patch)} />
+                    <div className="mt-3">
+                      <Button variant="secondary" onClick={() => setSettingsEditId(null)}>
+                        닫기
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             ))}
           </tbody>
         </table>
