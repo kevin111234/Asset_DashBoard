@@ -22,7 +22,7 @@ import { formatYmKorean } from '../engine/month';
 import { buildWarnings, findLowestCashMonth } from '../engine/warnings';
 import StatCard from '../components/StatCard';
 import StatusBadge from '../components/StatusBadge';
-import QuickAdjustPanel from '../components/QuickAdjustPanel';
+import QuickAddBar from '../components/QuickAddBar';
 import { bucketLabel } from '../lib/options';
 
 const PERIOD_OPTIONS = [6, 12, 24, 36] as const;
@@ -34,7 +34,7 @@ export default function Dashboard({
   onNavigate,
 }: {
   scenario: Scenario;
-  onNavigate: (tab: 'monthly') => void;
+  onNavigate: (tab: 'timeline') => void;
 }) {
   const [period, setPeriod] = useState<number>(Math.min(12, scenario.settings.forecastMonths));
   const simulation = useSimulation(scenario);
@@ -82,10 +82,12 @@ export default function Dashboard({
             </button>
           ))}
         </div>
-        <button onClick={() => onNavigate('monthly')} className="text-sm text-indigo-600 hover:underline dark:text-indigo-400">
-          월별 상세 보기 →
+        <button onClick={() => onNavigate('timeline')} className="text-sm text-indigo-600 hover:underline dark:text-indigo-400">
+          타임라인 보기 →
         </button>
       </div>
+
+      <QuickAddBar scenarioId={scenario.id} />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label="현재 보유 현금" value={formatWon(first.startCash)} />
@@ -137,7 +139,7 @@ export default function Dashboard({
           </ResponsiveContainer>
         </div>
 
-        <div className="lg:col-span-2 rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <div className="lg:col-span-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
           <h3 className="mb-2 text-sm font-semibold text-gray-700 dark:text-gray-200">월별 수입 / 지출</h3>
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={chartData}>
@@ -151,8 +153,6 @@ export default function Dashboard({
             </BarChart>
           </ResponsiveContainer>
         </div>
-
-        <QuickAdjustPanel scenario={scenario} />
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">

@@ -1,4 +1,4 @@
-import type { Loan, YearMonth } from '../types';
+import type { YearMonth } from '../types';
 import { addMonths } from './month';
 
 export interface LoanMonthEntry {
@@ -12,11 +12,22 @@ export interface LoanMonthEntry {
 
 export type LoanSchedule = Map<YearMonth, LoanMonthEntry>;
 
+/** MVP supports only 만기일시상환(bullet) and 직접 월 상환액 입력(manual). */
+export interface LoanScheduleInput {
+  principal: number;
+  annualRate: number;
+  startMonth: YearMonth;
+  repaymentType: 'bullet' | 'manual';
+  termMonths: number;
+  /** required when repaymentType === 'manual' */
+  manualMonthlyPayment?: number;
+}
+
 function round(n: number): number {
   return Math.round(n * 100) / 100;
 }
 
-export function buildLoanSchedule(loan: Loan): LoanSchedule {
+export function buildLoanSchedule(loan: LoanScheduleInput): LoanSchedule {
   const schedule: LoanSchedule = new Map();
   const monthlyRate = loan.annualRate / 12;
   const term = Math.max(1, Math.floor(loan.termMonths));
@@ -28,51 +39,6 @@ export function buildLoanSchedule(loan: Loan): LoanSchedule {
       const interest = round(balance * monthlyRate);
       const isLast = i === term - 1;
       const principalPayment = isLast ? balance : 0;
-      const balanceAfter = round(balance - principalPayment);
-      schedule.set(month, {
-        month,
-        interest,
-        principalPayment,
-        payment: round(interest + principalPayment),
-        balanceAfter,
-        proceeds: i === 0 ? loan.principal : 0,
-      });
-      balance = balanceAfter;
-    }
-    return schedule;
-  }
-
-  if (loan.repaymentType === 'equal_payment') {
-    const payment =
-      monthlyRate === 0
-        ? loan.principal / term
-        : (loan.principal * monthlyRate) / (1 - Math.pow(1 + monthlyRate, -term));
-    for (let i = 0; i < term; i++) {
-      const month = addMonths(loan.startMonth, i);
-      const interest = round(balance * monthlyRate);
-      const isLast = i === term - 1;
-      const principalPayment = isLast ? balance : round(payment - interest);
-      const balanceAfter = round(balance - principalPayment);
-      schedule.set(month, {
-        month,
-        interest,
-        principalPayment,
-        payment: round(interest + principalPayment),
-        balanceAfter,
-        proceeds: i === 0 ? loan.principal : 0,
-      });
-      balance = balanceAfter;
-    }
-    return schedule;
-  }
-
-  if (loan.repaymentType === 'equal_principal') {
-    const principalPortion = loan.principal / term;
-    for (let i = 0; i < term; i++) {
-      const month = addMonths(loan.startMonth, i);
-      const interest = round(balance * monthlyRate);
-      const isLast = i === term - 1;
-      const principalPayment = isLast ? balance : round(principalPortion);
       const balanceAfter = round(balance - principalPayment);
       schedule.set(month, {
         month,

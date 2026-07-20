@@ -1,15 +1,9 @@
 import { useState } from 'react';
 import type { Asset, AssetType, Liquidity, Scenario } from '../types';
 import { useDashboardStore } from '../store/store';
-import { ASSET_TYPE_OPTIONS, LIQUIDITY_OPTIONS, assetTypeLabel } from '../lib/options';
+import { ASSET_TYPE_OPTIONS, LIQUIDITY_OPTIONS, assetTypeLabel, liquidityLabel } from '../lib/options';
 import { formatWon } from '../lib/format';
-import { Button, Field, NumberInput, SelectInput, TextInput } from '../components/inputs';
-
-const LIQUIDITY_LABEL: Record<Liquidity, string> = {
-  immediate: '즉시 사용 가능',
-  short_term: '일정 기간 후 사용 가능',
-  locked: '장기적으로 묶여 있음',
-};
+import { Button, CheckboxInput, Field, NumberInput, SelectInput, TextInput } from '../components/inputs';
 
 type FormState = Omit<Asset, 'id'>;
 
@@ -19,8 +13,7 @@ const EMPTY_FORM: FormState = {
   principal: 0,
   marketValue: 0,
   liquidity: 'immediate',
-  liquidityMonths: undefined,
-  expectedReturnRate: undefined,
+  includeInAvailableCash: true,
   note: '',
 };
 
@@ -62,8 +55,10 @@ export default function AssetsSection({ scenario }: { scenario: Scenario }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">자산 관리</h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400">총 자산 평가금액: {formatWon(totalMarketValue)}</p>
+          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">자산</h2>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            현재 보유 자산의 시작 상태입니다. 총 평가금액: {formatWon(totalMarketValue)}
+          </p>
         </div>
         <Button onClick={startAdd}>자산 추가</Button>
       </div>
@@ -73,29 +68,26 @@ export default function AssetsSection({ scenario }: { scenario: Scenario }) {
           <Field label="자산명">
             <TextInput value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
           </Field>
-          <Field label="자산 유형">
+          <Field label="유형">
             <SelectInput value={form.type} onChange={(v: AssetType) => setForm({ ...form, type: v })} options={ASSET_TYPE_OPTIONS} />
           </Field>
-          <Field label="투자원금">
+          <Field label="원금">
             <NumberInput value={form.principal} onChange={(v) => setForm({ ...form, principal: v })} step={10000} />
           </Field>
           <Field label="현재 평가금액">
             <NumberInput value={form.marketValue} onChange={(v) => setForm({ ...form, marketValue: v })} step={10000} />
           </Field>
-          <Field label="현금화 가능 구분">
+          <Field label="유동성">
             <SelectInput value={form.liquidity} onChange={(v: Liquidity) => setForm({ ...form, liquidity: v })} options={LIQUIDITY_OPTIONS} />
           </Field>
-          <Field label="현금화 소요기간(개월)">
-            <NumberInput value={form.liquidityMonths ?? 0} onChange={(v) => setForm({ ...form, liquidityMonths: v })} />
-          </Field>
-          <Field label="수익률(연, %)">
-            <NumberInput
-              value={(form.expectedReturnRate ?? 0) * 100}
-              onChange={(v) => setForm({ ...form, expectedReturnRate: v / 100 })}
-              step={0.1}
+          <div className="flex items-end pb-1.5">
+            <CheckboxInput
+              checked={form.includeInAvailableCash}
+              onChange={(v) => setForm({ ...form, includeInAvailableCash: v })}
+              label="가용현금 계산에 포함"
             />
-          </Field>
-          <Field label="비고">
+          </div>
+          <Field label="메모">
             <TextInput value={form.note ?? ''} onChange={(v) => setForm({ ...form, note: v })} />
           </Field>
           <div className="col-span-full flex gap-2">
@@ -113,10 +105,11 @@ export default function AssetsSection({ scenario }: { scenario: Scenario }) {
             <tr className="text-left text-xs font-medium text-gray-500 dark:text-gray-400">
               <th className="px-3 py-2">자산명</th>
               <th className="px-3 py-2">유형</th>
-              <th className="px-3 py-2">투자원금</th>
+              <th className="px-3 py-2">원금</th>
               <th className="px-3 py-2">평가금액</th>
-              <th className="px-3 py-2">현금화 구분</th>
-              <th className="px-3 py-2">비고</th>
+              <th className="px-3 py-2">유동성</th>
+              <th className="px-3 py-2">가용현금</th>
+              <th className="px-3 py-2">메모</th>
               <th className="px-3 py-2" />
             </tr>
           </thead>
@@ -127,7 +120,8 @@ export default function AssetsSection({ scenario }: { scenario: Scenario }) {
                 <td className="px-3 py-2 text-gray-600 dark:text-gray-400">{assetTypeLabel(a.type)}</td>
                 <td className="px-3 py-2 tabular-nums">{formatWon(a.principal)}</td>
                 <td className="px-3 py-2 tabular-nums">{formatWon(a.marketValue)}</td>
-                <td className="px-3 py-2 text-gray-600 dark:text-gray-400">{LIQUIDITY_LABEL[a.liquidity]}</td>
+                <td className="px-3 py-2 text-gray-600 dark:text-gray-400">{liquidityLabel(a.liquidity)}</td>
+                <td className="px-3 py-2">{a.includeInAvailableCash ? '포함' : '제외'}</td>
                 <td className="px-3 py-2 text-gray-500 dark:text-gray-500">{a.note}</td>
                 <td className="px-3 py-2 text-right">
                   <button onClick={() => startEdit(a)} className="mr-2 text-xs text-indigo-600 hover:underline dark:text-indigo-400">
@@ -141,7 +135,7 @@ export default function AssetsSection({ scenario }: { scenario: Scenario }) {
             ))}
             {scenario.assets.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-3 py-6 text-center text-gray-400">
+                <td colSpan={8} className="px-3 py-6 text-center text-gray-400">
                   등록된 자산이 없습니다.
                 </td>
               </tr>

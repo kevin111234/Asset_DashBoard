@@ -39,3 +39,12 @@ export function formatYmKorean(ym: YearMonth): string {
 export function generateMonthRange(start: YearMonth, count: number): YearMonth[] {
   return Array.from({ length: count }, (_, i) => addMonths(start, i));
 }
+
+export function monthOfYear(ym: YearMonth): number {
+  return parseYm(ym).month;
+}
+
+export function currentYearMonth(): YearMonth {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}

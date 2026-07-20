@@ -11,6 +11,7 @@ import {
 } from 'recharts';
 import { useDashboardStore } from '../store/store';
 import { simulateScenario } from '../engine/engine';
+import { findLowestCashMonth } from '../engine/warnings';
 import { formatWon, formatManwon } from '../lib/format';
 import { formatYmKorean } from '../engine/month';
 import { Button, Field, TextInput } from '../components/inputs';
@@ -40,11 +41,8 @@ export default function ScenariosSection() {
     baseCurrency: 'KRW',
     startMonth: new Date().toISOString().slice(0, 7),
     forecastMonths: 36,
-    monthlyEssentialLiving: 700_000,
-    livingReserveMonths: 3,
-    emergencyFund: 1_000_000,
+    minimumCashAmount: 3_000_000,
     shortTermExpenseMonths: 3,
-    investmentAllocationRate: 0.5,
   });
 
   const [compareA, setCompareA] = useState<string>(activeScenarioId);
@@ -113,7 +111,7 @@ export default function ScenariosSection() {
             <TextInput value={createName} onChange={setCreateName} placeholder="예: 보증금 대출 없이" />
           </Field>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            빈 시나리오로 시작합니다. 만든 뒤 자산·현금흐름·저축투자·대출 탭에서 항목을 추가하세요.
+            빈 시나리오로 시작합니다. 만든 뒤 타임라인 탭에서 이벤트를 추가하세요.
           </p>
           <ScenarioSettingsForm value={createSettings} onChange={(patch) => setCreateSettings({ ...createSettings, ...patch })} />
           <div className="flex gap-2">
@@ -250,7 +248,10 @@ export default function ScenariosSection() {
             <div className="mb-4 grid grid-cols-2 gap-4">
               {[{ name: scenarioA.name, months: summaryA }, { name: scenarioB.name, months: summaryB }].map((col, colIdx) => {
                 const m0 = col.months[0];
+                const m6 = col.months[Math.min(5, col.months.length - 1)];
                 const m12 = col.months[Math.min(11, col.months.length - 1)];
+                const lowest = findLowestCashMonth(col.months);
+                const totalExpense = col.months.reduce((sum, m) => sum + m.totalExpense, 0);
                 return (
                   <div key={colIdx} className="rounded-lg border border-gray-100 p-3 dark:border-gray-800">
                     <h4 className="mb-1 text-sm font-semibold text-gray-800 dark:text-gray-200">{col.name}</h4>
@@ -262,8 +263,16 @@ export default function ScenariosSection() {
                         <dd className="text-right tabular-nums">{formatWon(m0.availableCash)}</dd>
                         <dt className="text-gray-500">순자산</dt>
                         <dd className="text-right tabular-nums">{formatWon(m0.netWorth)}</dd>
+                        <dt className="text-gray-500">6개월 후 현금</dt>
+                        <dd className="text-right tabular-nums">{formatWon(m6.endCash)}</dd>
                         <dt className="text-gray-500">12개월 후 현금</dt>
                         <dd className="text-right tabular-nums">{formatWon(m12.endCash)}</dd>
+                        <dt className="text-gray-500">최저 현금</dt>
+                        <dd className="text-right tabular-nums">{lowest ? formatWon(lowest.endCash) : '-'}</dd>
+                        <dt className="text-gray-500">최저 현금 발생월</dt>
+                        <dd className="text-right">{lowest ? formatYmKorean(lowest.month) : '-'}</dd>
+                        <dt className="text-gray-500">총지출(전체 기간)</dt>
+                        <dd className="text-right tabular-nums">{formatWon(totalExpense)}</dd>
                       </dl>
                     ) : (
                       <p className="text-xs text-gray-400">데이터 없음</p>
