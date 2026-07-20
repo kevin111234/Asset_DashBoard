@@ -1,23 +1,32 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { v4 as uuid } from 'uuid';
-import type { Asset, CashFlowItem, Loan, Scenario, ScenarioSettings, TransferItem } from '../types';
+import type {
+  Asset,
+  EventException,
+  FinEvent,
+  RecentEventEntry,
+  Scenario,
+  ScenarioSettings,
+  YearMonth,
+} from '../types';
 import { buildSeedScenario } from './seed';
+import { currentYearMonth } from '../engine/month';
+
+const RECENT_EVENTS_LIMIT = 8;
 
 const DEFAULT_NEW_SCENARIO_SETTINGS: ScenarioSettings = {
   baseCurrency: 'KRW',
-  startMonth: new Date().toISOString().slice(0, 7),
+  startMonth: currentYearMonth(),
   forecastMonths: 36,
-  monthlyEssentialLiving: 700_000,
-  livingReserveMonths: 3,
-  emergencyFund: 1_000_000,
+  minimumCashAmount: 3_000_000,
   shortTermExpenseMonths: 3,
-  investmentAllocationRate: 0.5,
 };
 
 interface DashboardState {
   scenarios: Scenario[];
   activeScenarioId: string;
+  recentEvents: RecentEventEntry[];
 
   setActiveScenario: (id: string) => void;
   createScenario: (name: string, settings?: Partial<ScenarioSettings>) => string;
@@ -32,17 +41,12 @@ interface DashboardState {
   updateAsset: (scenarioId: string, id: string, patch: Partial<Asset>) => void;
   removeAsset: (scenarioId: string, id: string) => void;
 
-  addCashFlow: (scenarioId: string, item: Omit<CashFlowItem, 'id'>) => void;
-  updateCashFlow: (scenarioId: string, id: string, patch: Partial<CashFlowItem>) => void;
-  removeCashFlow: (scenarioId: string, id: string) => void;
-
-  addTransfer: (scenarioId: string, item: Omit<TransferItem, 'id'>) => void;
-  updateTransfer: (scenarioId: string, id: string, patch: Partial<TransferItem>) => void;
-  removeTransfer: (scenarioId: string, id: string) => void;
-
-  addLoan: (scenarioId: string, item: Omit<Loan, 'id'>) => void;
-  updateLoan: (scenarioId: string, id: string, patch: Partial<Loan>) => void;
-  removeLoan: (scenarioId: string, id: string) => void;
+  addEvent: (scenarioId: string, event: Omit<FinEvent, 'id'>) => string;
+  updateEvent: (scenarioId: string, id: string, patch: Partial<FinEvent>) => void;
+  removeEvent: (scenarioId: string, id: string) => void;
+  duplicateEvent: (scenarioId: string, id: string) => string | null;
+  toggleEventActive: (scenarioId: string, id: string) => void;
+  setEventException: (scenarioId: string, id: string, month: YearMonth, exception: EventException | null) => void;
 
   exportData: () => string;
   importData: (json: string) => { ok: true } | { ok: false; error: string };
@@ -53,11 +57,17 @@ function withScenario(scenarios: Scenario[], id: string, updater: (s: Scenario) 
   return scenarios.map((s) => (s.id === id ? updater(s) : s));
 }
 
+function pushRecentEvent(recent: RecentEventEntry[], entry: RecentEventEntry): RecentEventEntry[] {
+  const deduped = recent.filter((r) => !(r.type === entry.type && r.name === entry.name));
+  return [entry, ...deduped].slice(0, RECENT_EVENTS_LIMIT);
+}
+
 export const useDashboardStore = create<DashboardState>()(
   persist(
     (set, get) => ({
       scenarios: [buildSeedScenario()],
       activeScenarioId: 'scenario-base',
+      recentEvents: [],
 
       setActiveScenario: (id) => set({ activeScenarioId: id }),
 
@@ -70,9 +80,7 @@ export const useDashboardStore = create<DashboardState>()(
           createdAt: new Date().toISOString(),
           settings: { ...DEFAULT_NEW_SCENARIO_SETTINGS, ...settings },
           assets: [],
-          cashFlows: [],
-          transfers: [],
-          loans: [],
+          events: [],
         };
         set((state) => ({ scenarios: [...state.scenarios, scenario] }));
         return newId;
@@ -90,9 +98,14 @@ export const useDashboardStore = create<DashboardState>()(
           createdAt: new Date().toISOString(),
           baseScenarioId: src.id,
           assets: src.assets.map((a) => ({ ...a })),
-          cashFlows: src.cashFlows.map((c) => ({ ...c })),
-          transfers: src.transfers.map((t) => ({ ...t })),
-          loans: src.loans.map((l) => ({ ...l })),
+          events: src.events.map((e) => ({
+            ...e,
+            recurrence: e.recurrence
+              ? { ...e.recurrence, exceptions: e.recurrence.exceptions ? { ...e.recurrence.exceptions } : undefined }
+              : undefined,
+            transfer: e.transfer ? { ...e.transfer } : undefined,
+            loan: e.loan ? { ...e.loan } : undefined,
+          })),
           settings: { ...src.settings },
         };
         set((state) => ({ scenarios: [...state.scenarios, clone] }));
@@ -146,69 +159,75 @@ export const useDashboardStore = create<DashboardState>()(
           })),
         })),
 
-      addCashFlow: (scenarioId, item) =>
+      addEvent: (scenarioId, event) => {
+        const newId = uuid();
         set((state) => ({
           scenarios: withScenario(state.scenarios, scenarioId, (s) => ({
             ...s,
-            cashFlows: [...s.cashFlows, { ...item, id: uuid() }],
+            events: [...s.events, { ...event, id: newId }],
+          })),
+          recentEvents: pushRecentEvent(state.recentEvents, {
+            type: event.type,
+            name: event.name,
+            amount: event.amount,
+            category: event.category,
+            transferKind: event.transfer?.kind,
+            recurrenceFrequency: event.recurrence?.frequency,
+          }),
+        }));
+        return newId;
+      },
+      updateEvent: (scenarioId, id, patch) =>
+        set((state) => ({
+          scenarios: withScenario(state.scenarios, scenarioId, (s) => ({
+            ...s,
+            events: s.events.map((e) => (e.id === id ? { ...e, ...patch } : e)),
           })),
         })),
-      updateCashFlow: (scenarioId, id, patch) =>
+      removeEvent: (scenarioId, id) =>
         set((state) => ({
           scenarios: withScenario(state.scenarios, scenarioId, (s) => ({
             ...s,
-            cashFlows: s.cashFlows.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+            events: s.events.filter((e) => e.id !== id),
           })),
         })),
-      removeCashFlow: (scenarioId, id) =>
+      duplicateEvent: (scenarioId, id) => {
+        const scenario = get().scenarios.find((s) => s.id === scenarioId);
+        const src = scenario?.events.find((e) => e.id === id);
+        if (!src) return null;
+        const newId = uuid();
+        const clone: FinEvent = {
+          ...src,
+          id: newId,
+          recurrence: src.recurrence
+            ? { ...src.recurrence, exceptions: src.recurrence.exceptions ? { ...src.recurrence.exceptions } : undefined }
+            : undefined,
+          transfer: src.transfer ? { ...src.transfer } : undefined,
+          loan: src.loan ? { ...src.loan } : undefined,
+        };
+        set((state) => ({
+          scenarios: withScenario(state.scenarios, scenarioId, (s) => ({ ...s, events: [...s.events, clone] })),
+        }));
+        return newId;
+      },
+      toggleEventActive: (scenarioId, id) =>
         set((state) => ({
           scenarios: withScenario(state.scenarios, scenarioId, (s) => ({
             ...s,
-            cashFlows: s.cashFlows.filter((c) => c.id !== id),
+            events: s.events.map((e) => (e.id === id ? { ...e, active: !e.active } : e)),
           })),
         })),
-
-      addTransfer: (scenarioId, item) =>
+      setEventException: (scenarioId, id, month, exception) =>
         set((state) => ({
           scenarios: withScenario(state.scenarios, scenarioId, (s) => ({
             ...s,
-            transfers: [...s.transfers, { ...item, id: uuid() }],
-          })),
-        })),
-      updateTransfer: (scenarioId, id, patch) =>
-        set((state) => ({
-          scenarios: withScenario(state.scenarios, scenarioId, (s) => ({
-            ...s,
-            transfers: s.transfers.map((t) => (t.id === id ? { ...t, ...patch } : t)),
-          })),
-        })),
-      removeTransfer: (scenarioId, id) =>
-        set((state) => ({
-          scenarios: withScenario(state.scenarios, scenarioId, (s) => ({
-            ...s,
-            transfers: s.transfers.filter((t) => t.id !== id),
-          })),
-        })),
-
-      addLoan: (scenarioId, item) =>
-        set((state) => ({
-          scenarios: withScenario(state.scenarios, scenarioId, (s) => ({
-            ...s,
-            loans: [...s.loans, { ...item, id: uuid() }],
-          })),
-        })),
-      updateLoan: (scenarioId, id, patch) =>
-        set((state) => ({
-          scenarios: withScenario(state.scenarios, scenarioId, (s) => ({
-            ...s,
-            loans: s.loans.map((l) => (l.id === id ? { ...l, ...patch } : l)),
-          })),
-        })),
-      removeLoan: (scenarioId, id) =>
-        set((state) => ({
-          scenarios: withScenario(state.scenarios, scenarioId, (s) => ({
-            ...s,
-            loans: s.loans.filter((l) => l.id !== id),
+            events: s.events.map((e) => {
+              if (e.id !== id || !e.recurrence) return e;
+              const nextExceptions = { ...(e.recurrence.exceptions ?? {}) };
+              if (exception === null) delete nextExceptions[month];
+              else nextExceptions[month] = exception;
+              return { ...e, recurrence: { ...e.recurrence, exceptions: nextExceptions } };
+            }),
           })),
         })),
 
@@ -235,13 +254,23 @@ export const useDashboardStore = create<DashboardState>()(
 
       resetToSeed: () => {
         const seed = buildSeedScenario();
-        set({ scenarios: [seed], activeScenarioId: seed.id });
+        set({ scenarios: [seed], activeScenarioId: seed.id, recentEvents: [] });
       },
     }),
     {
       name: 'asset-planning-dashboard',
       storage: createJSONStorage(() => localStorage),
-      version: 1,
+      version: 2,
+      // v1 scenarios used cashFlows/transfers/loans instead of a unified
+      // events array; there is no lossless way to migrate that shape, so
+      // fall back to a fresh seed rather than crash on old localStorage data.
+      migrate: (persistedState, version) => {
+        if (version < 2) {
+          const seed = buildSeedScenario();
+          return { scenarios: [seed], activeScenarioId: seed.id, recentEvents: [] };
+        }
+        return persistedState as DashboardState;
+      },
     },
   ),
 );
