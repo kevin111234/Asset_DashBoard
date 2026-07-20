@@ -34,9 +34,28 @@ interface Props {
   /** create-only presets, e.g. from the quick-add bar (+저축/+투자/+대출...) */
   initialType?: EventType;
   initialTransferKind?: TransferKind;
+  /** create-only presets for a prefilled sell/transfer, e.g. from the Assets screen's "매도" action */
+  initialName?: string;
+  initialAmount?: number;
+  initialFromBucket?: BucketKey;
+  initialToBucket?: BucketKey;
+  initialCategory?: string;
 }
 
-export default function EventForm({ scenarioId, mode, contextMonth, event, onClose, initialType, initialTransferKind }: Props) {
+export default function EventForm({
+  scenarioId,
+  mode,
+  contextMonth,
+  event,
+  onClose,
+  initialType,
+  initialTransferKind,
+  initialName,
+  initialAmount,
+  initialFromBucket,
+  initialToBucket,
+  initialCategory,
+}: Props) {
   const addEvent = useDashboardStore((s) => s.addEvent);
   const updateEvent = useDashboardStore((s) => s.updateEvent);
   const removeEvent = useDashboardStore((s) => s.removeEvent);
@@ -44,13 +63,15 @@ export default function EventForm({ scenarioId, mode, contextMonth, event, onClo
   const recentEvents = useDashboardStore((s) => s.recentEvents);
 
   const [type, setType] = useState<EventType>(event?.type ?? initialType ?? 'expense');
-  const [name, setName] = useState(event?.name ?? '');
-  const [amount, setAmount] = useState<number>(event?.amount ?? 0);
-  const [amountText, setAmountText] = useState<string>(event?.amount ? String(event.amount) : '');
+  const [name, setName] = useState(event?.name ?? initialName ?? '');
+  const [amount, setAmount] = useState<number>(event?.amount ?? initialAmount ?? 0);
+  const [amountText, setAmountText] = useState<string>(
+    event?.amount ? String(event.amount) : initialAmount ? String(initialAmount) : '',
+  );
   const [month, setMonth] = useState<YearMonth>(event?.month ?? contextMonth ?? new Date().toISOString().slice(0, 7));
 
-  const [showDetails, setShowDetails] = useState(mode === 'edit');
-  const [category, setCategory] = useState<string>(event?.category ?? '');
+  const [showDetails, setShowDetails] = useState(mode === 'edit' || !!initialFromBucket);
+  const [category, setCategory] = useState<string>(event?.category ?? initialCategory ?? '');
   const [required, setRequired] = useState(!!event?.required);
   const [memo, setMemo] = useState(event?.memo ?? '');
 
@@ -60,8 +81,8 @@ export default function EventForm({ scenarioId, mode, contextMonth, event, onClo
   const [recEnd, setRecEnd] = useState<YearMonth>(event?.recurrence?.endMonth ?? '');
 
   const [transferKind, setTransferKind] = useState<TransferKind>(event?.transfer?.kind ?? initialTransferKind ?? 'saving');
-  const [fromBucket, setFromBucket] = useState<BucketKey>(event?.transfer?.from ?? 'cash');
-  const [toBucket, setToBucket] = useState<BucketKey>(event?.transfer?.to ?? 'government_savings');
+  const [fromBucket, setFromBucket] = useState<BucketKey>(event?.transfer?.from ?? initialFromBucket ?? 'cash');
+  const [toBucket, setToBucket] = useState<BucketKey>(event?.transfer?.to ?? initialToBucket ?? 'government_savings');
 
   const [annualRatePct, setAnnualRatePct] = useState<number>((event?.loan?.annualRate ?? 0.03) * 100);
   const [repaymentType, setRepaymentType] = useState<LoanRepaymentType>(event?.loan?.repaymentType ?? 'bullet');
