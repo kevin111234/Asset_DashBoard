@@ -238,4 +238,96 @@ describe('simulateScenario', () => {
     expect(result.months[0].endCash).toBe(1_000_000);
     expect(result.months[0].loanBalance).toBe(0);
   });
+
+  it('grows a bucket by its asset expectedReturnRate month over month, without touching cash', () => {
+    const stockAsset: Asset = {
+      id: 'stock1',
+      name: '주식',
+      type: 'stock',
+      principal: 10_000_000,
+      marketValue: 10_000_000,
+      liquidity: 'immediate',
+      includeInAvailableCash: false,
+      expectedReturnRate: 0.12, // 12% annual
+    };
+    const scenario = baseScenario({ assets: [cashAsset(1_000_000), stockAsset] });
+    const result = simulateScenario(scenario);
+    const monthlyRate = Math.pow(1.12, 1 / 12) - 1;
+
+    expect(result.months[0].endCash).toBe(1_000_000); // growth never touches cash
+    expect(result.months[0].investmentGrowth).toBeCloseTo(10_000_000 * monthlyRate, 0);
+    expect(result.months[0].assetBalances.stock).toBeCloseTo(10_000_000 * (1 + monthlyRate), 0);
+
+    // compounds across months
+    const expectedMonth2 = 10_000_000 * Math.pow(1 + monthlyRate, 2);
+    expect(result.months[1].assetBalances.stock).toBeCloseTo(expectedMonth2, 0);
+    expect(result.months[1].netWorth).toBeCloseTo(1_000_000 + expectedMonth2, 0);
+  });
+
+  it('weights the bucket return rate by market value across multiple assets in the same bucket', () => {
+    const assets: Asset[] = [
+      {
+        id: 'stock1',
+        name: 'A',
+        type: 'stock',
+        principal: 3_000_000,
+        marketValue: 3_000_000,
+        liquidity: 'immediate',
+        includeInAvailableCash: false,
+        expectedReturnRate: 0.1,
+      },
+      {
+        id: 'stock2',
+        name: 'B',
+        type: 'stock',
+        principal: 1_000_000,
+        marketValue: 1_000_000,
+        liquidity: 'immediate',
+        includeInAvailableCash: false,
+        expectedReturnRate: 0.02,
+      },
+    ];
+    const scenario = baseScenario({ assets });
+    const result = simulateScenario(scenario);
+    // weighted average: (3M*10% + 1M*2%) / 4M = 8%
+    const expectedAnnual = (3_000_000 * 0.1 + 1_000_000 * 0.02) / 4_000_000;
+    const monthlyRate = Math.pow(1 + expectedAnnual, 1 / 12) - 1;
+    expect(result.months[0].assetBalances.stock).toBeCloseTo(4_000_000 * (1 + monthlyRate), 0);
+  });
+
+  it('reflects accrued gains when a grown asset is later sold via a transfer event', () => {
+    const stockAsset: Asset = {
+      id: 'stock1',
+      name: '주식',
+      type: 'stock',
+      principal: 10_000_000,
+      marketValue: 10_000_000,
+      liquidity: 'immediate',
+      includeInAvailableCash: false,
+      expectedReturnRate: 0.12,
+    };
+    // first, find out how much the position is actually worth after one month of growth
+    const preSale = simulateScenario(baseScenario({ assets: [cashAsset(0), stockAsset] }));
+    const grownValue = preSale.months[0].assetBalances.stock;
+    expect(grownValue).toBeGreaterThan(10_000_000); // sanity: growth actually accrued
+
+    // sell the full (grown) position the following month
+    const events: FinEvent[] = [
+      {
+        id: 'sell',
+        type: 'transfer',
+        name: '주식 매도',
+        amount: grownValue,
+        month: '2026-08',
+        active: true,
+        transfer: { kind: 'investment', from: 'stock', to: 'cash' },
+      },
+    ];
+    const scenario = baseScenario({ assets: [cashAsset(0), stockAsset], events });
+    const result = simulateScenario(scenario);
+    const augResult = result.months[1];
+    // cash received reflects the grown value, not just the original principal
+    expect(augResult.endCash).toBeCloseTo(grownValue, 2);
+    expect(augResult.assetBalances.stock).toBeCloseTo(0, 0);
+  });
 });

@@ -30,6 +30,8 @@ export interface Asset {
   liquidity: Liquidity;
   /** 가용현금 계산에 포함할지 여부. 기본은 즉시 사용 가능 자산만 true. */
   includeInAvailableCash: boolean;
+  /** 연 기대수익률(가격변동률). 이 자산이 속한 버킷 전체의 월별 평가손익 계산에 반영된다. */
+  expectedReturnRate?: number;
   note?: string;
 }
 
@@ -185,6 +187,10 @@ export interface MonthlyResult {
   nonCashAssetTotal: number;
   loanBalance: number;
   netWorth: number;
+  /** 이 달의 평가손익(가격변동에 따른 자산 증감, 순자산에는 반영되지만 현금에는 영향 없음) */
+  investmentGrowth: number;
+  /** 카테고리별 이 달의 평가손익 */
+  bucketGrowth: Partial<Record<BucketKey, number>>;
   status: WarningStatus;
   events: MonthlyLedgerLine[];
   assetBalances: Record<BucketKey, number>;

@@ -189,6 +189,11 @@ export default function Timeline({ scenario }: { scenario: Scenario }) {
                       <SummaryItem label="총지출" value={formatWonSigned(-result.totalExpense)} tone="bad" />
                       <SummaryItem label="자산이동" value={formatWonSigned(result.assetTransferNet)} />
                       <SummaryItem label="대출 순변동" value={formatWonSigned(result.loanNetChange)} />
+                      <SummaryItem
+                        label="평가손익"
+                        value={formatWonSigned(result.investmentGrowth)}
+                        tone={result.investmentGrowth > 0 ? 'good' : result.investmentGrowth < 0 ? 'bad' : undefined}
+                      />
                       <SummaryItem label="월말 현금" value={formatWon(result.endCash)} strong />
                       <SummaryItem label="가용현금" value={formatWon(result.availableCash)} strong tone={result.availableCash < 0 ? 'bad' : undefined} />
                     </div>

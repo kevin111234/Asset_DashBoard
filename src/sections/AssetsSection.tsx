@@ -1,11 +1,25 @@
-import { useState } from 'react';
-import type { Asset, AssetType, Liquidity, Scenario } from '../types';
+import { useMemo, useState } from 'react';
+import type { Asset, AssetType, BucketKey, Liquidity, Scenario } from '../types';
+import { assetBucketKey } from '../types';
 import { useDashboardStore } from '../store/store';
-import { ASSET_TYPE_OPTIONS, LIQUIDITY_OPTIONS, assetTypeLabel, liquidityLabel } from '../lib/options';
-import { formatWon } from '../lib/format';
+import { useSimulation } from '../lib/useSimulation';
+import { ALL_BUCKETS } from '../engine/engine';
+import { generateMonthRange, formatYmKorean } from '../engine/month';
+import { ASSET_TYPE_OPTIONS, LIQUIDITY_OPTIONS, assetTypeLabel, bucketLabel, liquidityLabel } from '../lib/options';
+import { formatWon, formatWonSigned, formatPercent } from '../lib/format';
 import { Button, CheckboxInput, Field, NumberInput, SelectInput, TextInput } from '../components/inputs';
+import EventForm from '../components/EventForm';
 
 type FormState = Omit<Asset, 'id'>;
+
+const SELL_CATEGORY_BY_BUCKET: Partial<Record<BucketKey, string>> = {
+  time_deposit: 'time_deposit',
+  stock: 'stock',
+  etf: 'etf',
+  bond: 'bond',
+  crypto: 'crypto',
+  government_savings: 'government_savings',
+};
 
 const EMPTY_FORM: FormState = {
   name: '',
@@ -14,6 +28,7 @@ const EMPTY_FORM: FormState = {
   marketValue: 0,
   liquidity: 'immediate',
   includeInAvailableCash: true,
+  expectedReturnRate: undefined,
   note: '',
 };
 
@@ -24,6 +39,25 @@ export default function AssetsSection({ scenario }: { scenario: Scenario }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [showForm, setShowForm] = useState(false);
+
+  const simulation = useSimulation(scenario);
+  const months = useMemo(
+    () => generateMonthRange(scenario.settings.startMonth, scenario.settings.forecastMonths),
+    [scenario.settings.startMonth, scenario.settings.forecastMonths],
+  );
+  const [selectedMonth, setSelectedMonth] = useState(months[0]);
+  const selectedIndex = simulation.months.findIndex((m) => m.month === selectedMonth);
+  const selectedResult = simulation.months[selectedIndex] ?? simulation.months[0];
+
+  // A sell event dated in `selectedMonth` executes before that month's own mark-to-market
+  // growth is applied, so it can only draw on the balance the bucket *entered* the month
+  // with — the previous month's closing balance (or the raw seed value for the first month).
+  function openingBalance(bucket: BucketKey): number {
+    if (selectedIndex > 0) return Math.round(simulation.months[selectedIndex - 1].assetBalances[bucket]);
+    return scenario.assets.filter((a) => assetBucketKey(a) === bucket).reduce((sum, a) => sum + a.marketValue, 0);
+  }
+
+  const [sellTarget, setSellTarget] = useState<BucketKey | null>(null);
 
   function startAdd() {
     setForm(EMPTY_FORM);
@@ -39,6 +73,12 @@ export default function AssetsSection({ scenario }: { scenario: Scenario }) {
     setShowForm(true);
   }
 
+  const CASH_LIKE_TYPES: AssetType[] = ['cash', 'checking', 'parking'];
+  function handleTypeChange(type: AssetType) {
+    const cashLike = CASH_LIKE_TYPES.includes(type);
+    setForm((f) => ({ ...f, type, includeInAvailableCash: cashLike, liquidity: cashLike ? 'immediate' : f.liquidity }));
+  }
+
   function save() {
     if (!form.name.trim()) return;
     if (editingId) {
@@ -52,12 +92,99 @@ export default function AssetsSection({ scenario }: { scenario: Scenario }) {
   const totalMarketValue = scenario.assets.reduce((sum, a) => sum + a.marketValue, 0);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">자산 현황</h2>
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          타임라인의 모든 이벤트가 반영된 카테고리별 잔액입니다. 아래 초기 자산을 수정하거나 타임라인에서 이벤트를 바꾸면 여기도 즉시 갱신됩니다.
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">카테고리별 잔액</h3>
+          <select
+            className="rounded-md border border-gray-300 px-2.5 py-1.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+          >
+            {months.map((m) => (
+              <option key={m} value={m}>
+                {formatYmKorean(m)}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {selectedResult && (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-100 text-sm dark:divide-gray-800">
+              <thead>
+                <tr className="text-left text-xs font-medium text-gray-500 dark:text-gray-400">
+                  <th className="py-1.5 pr-3">카테고리</th>
+                  <th className="py-1.5 pr-3">잔액</th>
+                  <th className="py-1.5 pr-3">이 달 평가손익</th>
+                  <th className="py-1.5" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                {ALL_BUCKETS.map((bucket) => {
+                  const balance = selectedResult.assetBalances[bucket];
+                  const growth = selectedResult.bucketGrowth[bucket];
+                  return (
+                    <tr key={bucket}>
+                      <td className="py-1.5 pr-3 font-medium text-gray-800 dark:text-gray-200">{bucketLabel(bucket)}</td>
+                      <td className="py-1.5 pr-3 tabular-nums">{formatWon(balance)}</td>
+                      <td
+                        className={`py-1.5 pr-3 tabular-nums ${
+                          growth ? (growth > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400') : 'text-gray-400'
+                        }`}
+                      >
+                        {growth ? formatWonSigned(growth) : '-'}
+                      </td>
+                      <td className="py-1.5 text-right">
+                        {bucket !== 'cash' && balance > 0 && (
+                          <button
+                            onClick={() => setSellTarget(bucket)}
+                            className="text-xs text-indigo-600 hover:underline dark:text-indigo-400"
+                          >
+                            매도(현금화)
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <p className="mt-2 text-xs text-gray-400">
+              이 달 평가손익(전체): {formatWonSigned(selectedResult.investmentGrowth)} · 순자산: {formatWon(selectedResult.netWorth)}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {sellTarget && (
+        <EventForm
+          scenarioId={scenario.id}
+          mode="create"
+          contextMonth={selectedMonth}
+          initialType="transfer"
+          initialTransferKind="investment"
+          initialName={`${bucketLabel(sellTarget)} 매도`}
+          initialAmount={openingBalance(sellTarget)}
+          initialCategory={SELL_CATEGORY_BY_BUCKET[sellTarget] ?? 'other_transfer'}
+          initialFromBucket={sellTarget}
+          initialToBucket="cash"
+          onClose={() => setSellTarget(null)}
+        />
+      )}
+
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">자산</h2>
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">초기 자산 등록</h3>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            현재 보유 자산의 시작 상태입니다. 총 평가금액: {formatWon(totalMarketValue)}
+            시뮬레이션 시작월 기준 보유 자산의 시작 상태입니다. 총 평가금액: {formatWon(totalMarketValue)}
           </p>
         </div>
         <Button onClick={startAdd}>자산 추가</Button>
@@ -69,7 +196,7 @@ export default function AssetsSection({ scenario }: { scenario: Scenario }) {
             <TextInput value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
           </Field>
           <Field label="유형">
-            <SelectInput value={form.type} onChange={(v: AssetType) => setForm({ ...form, type: v })} options={ASSET_TYPE_OPTIONS} />
+            <SelectInput value={form.type} onChange={handleTypeChange} options={ASSET_TYPE_OPTIONS} />
           </Field>
           <Field label="원금">
             <NumberInput value={form.principal} onChange={(v) => setForm({ ...form, principal: v })} step={10000} />
@@ -79,6 +206,13 @@ export default function AssetsSection({ scenario }: { scenario: Scenario }) {
           </Field>
           <Field label="유동성">
             <SelectInput value={form.liquidity} onChange={(v: Liquidity) => setForm({ ...form, liquidity: v })} options={LIQUIDITY_OPTIONS} />
+          </Field>
+          <Field label="연 기대수익률(%)">
+            <NumberInput
+              value={(form.expectedReturnRate ?? 0) * 100}
+              onChange={(v) => setForm({ ...form, expectedReturnRate: v === 0 ? undefined : v / 100 })}
+              step={0.5}
+            />
           </Field>
           <div className="flex items-end pb-1.5">
             <CheckboxInput
@@ -108,6 +242,7 @@ export default function AssetsSection({ scenario }: { scenario: Scenario }) {
               <th className="px-3 py-2">원금</th>
               <th className="px-3 py-2">평가금액</th>
               <th className="px-3 py-2">유동성</th>
+              <th className="px-3 py-2">기대수익률</th>
               <th className="px-3 py-2">가용현금</th>
               <th className="px-3 py-2">메모</th>
               <th className="px-3 py-2" />
@@ -121,6 +256,7 @@ export default function AssetsSection({ scenario }: { scenario: Scenario }) {
                 <td className="px-3 py-2 tabular-nums">{formatWon(a.principal)}</td>
                 <td className="px-3 py-2 tabular-nums">{formatWon(a.marketValue)}</td>
                 <td className="px-3 py-2 text-gray-600 dark:text-gray-400">{liquidityLabel(a.liquidity)}</td>
+                <td className="px-3 py-2 tabular-nums">{a.expectedReturnRate ? formatPercent(a.expectedReturnRate) : '-'}</td>
                 <td className="px-3 py-2">{a.includeInAvailableCash ? '포함' : '제외'}</td>
                 <td className="px-3 py-2 text-gray-500 dark:text-gray-500">{a.note}</td>
                 <td className="px-3 py-2 text-right">
@@ -135,7 +271,7 @@ export default function AssetsSection({ scenario }: { scenario: Scenario }) {
             ))}
             {scenario.assets.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-3 py-6 text-center text-gray-400">
+                <td colSpan={9} className="px-3 py-6 text-center text-gray-400">
                   등록된 자산이 없습니다.
                 </td>
               </tr>

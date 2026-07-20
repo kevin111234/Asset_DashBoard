@@ -1,4 +1,5 @@
 import type {
+  Asset,
   Scenario,
   FinEvent,
   MonthlyResult,
@@ -29,6 +30,32 @@ interface Occurrence {
   amount: number;
 }
 
+/**
+ * Per-bucket annual return rate, as the marketValue-weighted average of the
+ * expectedReturnRate of the assets that seed that bucket. Buckets with no
+ * rate-bearing assets (or no assets at all) default to 0 — money moved into
+ * them later via transfers doesn't retroactively pick up a rate, this is a
+ * simplification appropriate for a personal planning tool.
+ */
+function computeBucketReturnRates(assets: Asset[]): Partial<Record<BucketKey, number>> {
+  const weightedSum: Partial<Record<BucketKey, number>> = {};
+  const weightTotal: Partial<Record<BucketKey, number>> = {};
+  for (const asset of assets) {
+    if (!asset.expectedReturnRate) continue;
+    const bucket = assetBucketKey(asset);
+    if (bucket === 'cash') continue;
+    const weight = Math.max(0, asset.marketValue);
+    weightedSum[bucket] = (weightedSum[bucket] ?? 0) + asset.expectedReturnRate * weight;
+    weightTotal[bucket] = (weightTotal[bucket] ?? 0) + weight;
+  }
+  const rates: Partial<Record<BucketKey, number>> = {};
+  for (const bucket of Object.keys(weightTotal) as BucketKey[]) {
+    const total = weightTotal[bucket]!;
+    if (total > 0) rates[bucket] = weightedSum[bucket]! / total;
+  }
+  return rates;
+}
+
 /** Resolves whether an event fires in `month`, and at what amount, honoring
  * the active flag, recurrence window/frequency, and per-month exceptions. */
 export function resolveOccurrence(event: FinEvent, month: YearMonth): Occurrence {
@@ -57,6 +84,11 @@ export function simulateScenario(scenario: Scenario): SimulationResult {
   ) as Record<BucketKey, number>;
   for (const asset of scenario.assets) {
     bucketBalances[assetBucketKey(asset)] += asset.marketValue;
+  }
+  const bucketReturnRates = computeBucketReturnRates(scenario.assets);
+  const bucketMonthlyRates: Partial<Record<BucketKey, number>> = {};
+  for (const bucket of Object.keys(bucketReturnRates) as BucketKey[]) {
+    bucketMonthlyRates[bucket] = Math.pow(1 + bucketReturnRates[bucket]!, 1 / 12) - 1;
   }
 
   const loanSchedules: { event: FinEvent; schedule: LoanSchedule }[] = scenario.events
@@ -149,6 +181,21 @@ export function simulateScenario(scenario: Scenario): SimulationResult {
       return sum + (entry ? entry.balanceAfter : 0);
     }, 0);
 
+    // month-end mark-to-market: non-cash buckets grow/shrink by their blended
+    // expected return rate. This changes net worth but never touches cash —
+    // gains only become spendable once a transfer event sells them back to cash.
+    let investmentGrowth = 0;
+    const bucketGrowth: Partial<Record<BucketKey, number>> = {};
+    for (const bucket of ALL_BUCKETS) {
+      if (bucket === 'cash') continue;
+      const monthlyRate = bucketMonthlyRates[bucket];
+      if (!monthlyRate) continue;
+      const growth = Math.round(bucketBalances[bucket] * monthlyRate);
+      bucketBalances[bucket] += growth;
+      investmentGrowth += growth;
+      bucketGrowth[bucket] = growth;
+    }
+
     const nonCashAssetTotal = ALL_BUCKETS.filter((b) => b !== 'cash').reduce((sum, b) => sum + bucketBalances[b], 0);
     const netWorth = endCash + nonCashAssetTotal - loanBalance;
 
@@ -173,6 +220,8 @@ export function simulateScenario(scenario: Scenario): SimulationResult {
       nonCashAssetTotal,
       loanBalance,
       netWorth,
+      investmentGrowth,
+      bucketGrowth,
       status,
       events: ledger,
       assetBalances: { ...bucketBalances },
