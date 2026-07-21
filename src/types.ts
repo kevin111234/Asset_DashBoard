@@ -93,6 +93,15 @@ export interface TransferDetails {
   kind: TransferKind;
   from: BucketKey;
   to: BucketKey;
+  /**
+   * When set (0-100), this event moves that percentage of the `from` bucket's
+   * balance at execution time instead of the event's fixed `amount` — e.g.
+   * 100 = 전체 매도(sell everything), 50 = 보유의 절반 매도. This makes a sale
+   * correct regardless of how much the position has gained or lost by the
+   * time the event actually fires, instead of a stale amount computed once
+   * at creation time.
+   */
+  sellPercentage?: number;
 }
 
 /** MVP supports only 만기일시상환(bullet) and 직접 월 상환액 입력(manual). */
@@ -134,6 +143,8 @@ export interface EventTemplate {
   category?: string;
   recurrence?: 'monthly';
   transferKind?: TransferKind;
+  /** for sell-type templates (e.g. 자산 매각): preselects 보유 비율 매도 mode at this % */
+  sellPercentage?: number;
 }
 
 export interface ScenarioSettings {

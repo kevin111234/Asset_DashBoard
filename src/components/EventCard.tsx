@@ -52,6 +52,11 @@ export default function EventCard({
               {event.recurrence.frequency === 'monthly' ? '매월' : '매년'}
             </span>
           )}
+          {event.transfer?.sellPercentage !== undefined && (
+            <span className="shrink-0 rounded bg-indigo-100 px-1 py-0.5 text-[10px] text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+              {event.transfer.sellPercentage === 100 ? '전체 매도' : `${event.transfer.sellPercentage}% 매도`}
+            </span>
+          )}
           {!event.active && <span className="shrink-0 rounded bg-gray-200 px-1 py-0.5 text-[10px] text-gray-600 dark:bg-gray-700 dark:text-gray-300">비활성</span>}
           {skipped && event.active && (
             <span className="shrink-0 rounded bg-amber-100 px-1 py-0.5 text-[10px] text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">

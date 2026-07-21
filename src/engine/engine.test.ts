@@ -330,4 +330,74 @@ describe('simulateScenario', () => {
     expect(augResult.endCash).toBeCloseTo(grownValue, 2);
     expect(augResult.assetBalances.stock).toBeCloseTo(0, 0);
   });
+
+  it('전체 매도(100%) always sells the current bucket balance, ignoring the stale static amount', () => {
+    const stockAsset: Asset = {
+      id: 'stock1',
+      name: '주식',
+      type: 'stock',
+      principal: 4_000_000,
+      marketValue: 4_000_000,
+      liquidity: 'immediate',
+      includeInAvailableCash: false,
+      expectedReturnRate: -0.5, // sharp drop, e.g. 400만원 -> 200만원 scenario
+    };
+    const events: FinEvent[] = [
+      {
+        id: 'sell-all',
+        type: 'transfer',
+        name: '주식 전체 매도',
+        amount: 4_000_000, // stale: set when the position was still worth 400만원
+        month: '2026-09',
+        active: true,
+        transfer: { kind: 'investment', from: 'stock', to: 'cash', sellPercentage: 100 },
+      },
+    ];
+    const scenario = baseScenario({
+      settings: {
+        baseCurrency: 'KRW',
+        startMonth: '2026-07',
+        forecastMonths: 3,
+        minimumCashAmount: 0,
+        shortTermExpenseMonths: 0,
+      },
+      assets: [cashAsset(0), stockAsset],
+      events,
+    });
+    const result = simulateScenario(scenario);
+    const balanceEnteringSeptember = result.months[1].assetBalances.stock; // Aug close = Sep open
+    const sept = result.months[2];
+    // sells exactly what the position is actually worth, not the stale 4,000,000
+    expect(sept.endCash).toBe(balanceEnteringSeptember);
+    expect(sept.endCash).toBeLessThan(4_000_000);
+    expect(sept.assetBalances.stock).toBe(0);
+  });
+
+  it('보유 비율 매도(50%) sells half the current balance and leaves the rest invested', () => {
+    const stockAsset: Asset = {
+      id: 'stock1',
+      name: '주식',
+      type: 'stock',
+      principal: 10_000_000,
+      marketValue: 10_000_000,
+      liquidity: 'immediate',
+      includeInAvailableCash: false,
+    };
+    const events: FinEvent[] = [
+      {
+        id: 'sell-half',
+        type: 'transfer',
+        name: '주식 절반 매도',
+        amount: 0,
+        month: '2026-07',
+        active: true,
+        transfer: { kind: 'investment', from: 'stock', to: 'cash', sellPercentage: 50 },
+      },
+    ];
+    const scenario = baseScenario({ assets: [cashAsset(0), stockAsset], events });
+    const result = simulateScenario(scenario);
+    const m0 = result.months[0];
+    expect(m0.endCash).toBe(5_000_000);
+    expect(m0.assetBalances.stock).toBe(5_000_000);
+  });
 });

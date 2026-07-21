@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
 import type { Asset, AssetType, BucketKey, Liquidity, Scenario } from '../types';
-import { assetBucketKey } from '../types';
 import { useDashboardStore } from '../store/store';
 import { useSimulation } from '../lib/useSimulation';
+import { computeOpeningBalance } from '../lib/openingBalance';
 import { ALL_BUCKETS } from '../engine/engine';
 import { generateMonthRange, formatYmKorean } from '../engine/month';
 import { ASSET_TYPE_OPTIONS, LIQUIDITY_OPTIONS, assetTypeLabel, bucketLabel, liquidityLabel } from '../lib/options';
@@ -48,14 +48,6 @@ export default function AssetsSection({ scenario }: { scenario: Scenario }) {
   const [selectedMonth, setSelectedMonth] = useState(months[0]);
   const selectedIndex = simulation.months.findIndex((m) => m.month === selectedMonth);
   const selectedResult = simulation.months[selectedIndex] ?? simulation.months[0];
-
-  // A sell event dated in `selectedMonth` executes before that month's own mark-to-market
-  // growth is applied, so it can only draw on the balance the bucket *entered* the month
-  // with — the previous month's closing balance (or the raw seed value for the first month).
-  function openingBalance(bucket: BucketKey): number {
-    if (selectedIndex > 0) return Math.round(simulation.months[selectedIndex - 1].assetBalances[bucket]);
-    return scenario.assets.filter((a) => assetBucketKey(a) === bucket).reduce((sum, a) => sum + a.marketValue, 0);
-  }
 
   const [sellTarget, setSellTarget] = useState<BucketKey | null>(null);
 
@@ -148,7 +140,7 @@ export default function AssetsSection({ scenario }: { scenario: Scenario }) {
                             onClick={() => setSellTarget(bucket)}
                             className="text-xs text-indigo-600 hover:underline dark:text-indigo-400"
                           >
-                            매도(현금화)
+                            전체 매도
                           </button>
                         )}
                       </td>
@@ -172,10 +164,11 @@ export default function AssetsSection({ scenario }: { scenario: Scenario }) {
           initialType="transfer"
           initialTransferKind="investment"
           initialName={`${bucketLabel(sellTarget)} 매도`}
-          initialAmount={openingBalance(sellTarget)}
+          initialAmount={computeOpeningBalance(scenario, simulation.months, selectedMonth, sellTarget)}
           initialCategory={SELL_CATEGORY_BY_BUCKET[sellTarget] ?? 'other_transfer'}
           initialFromBucket={sellTarget}
           initialToBucket="cash"
+          initialSellPercentage={100}
           onClose={() => setSellTarget(null)}
         />
       )}

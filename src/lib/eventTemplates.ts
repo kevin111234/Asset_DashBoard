@@ -6,7 +6,9 @@ export const EVENT_TEMPLATES: EventTemplate[] = [
   { id: 'tpl-part-time', label: '아르바이트', type: 'income', name: '아르바이트', category: 'part_time', recurrence: 'monthly' },
   { id: 'tpl-bonus', label: '상여금', type: 'income', name: '상여금', category: 'bonus' },
   { id: 'tpl-refund', label: '환급금', type: 'income', name: '환급금', category: 'refund' },
-  { id: 'tpl-asset-sale', label: '자산 매각', type: 'income', name: '자산 매각', category: 'asset_sale' },
+  // 등록되지 않은(자산으로 추적하지 않는) 물건 매각 등 외부 수입. 보유 중인 주식/ETF 등을 파는 경우엔
+  // 아래 자산이동 섹션의 "보유자산 매각" 템플릿을 사용하세요 — 그래야 잔액과 손익이 정확히 반영됩니다.
+  { id: 'tpl-asset-sale', label: '기타 자산 매각', type: 'income', name: '자산 매각', category: 'asset_sale' },
 
   // 지출
   { id: 'tpl-rent', label: '월세', type: 'expense', name: '월세', category: 'housing', recurrence: 'monthly' },
@@ -44,6 +46,14 @@ export const EVENT_TEMPLATES: EventTemplate[] = [
     category: 'emergency_fund',
     recurrence: 'monthly',
     transferKind: 'saving',
+  },
+  {
+    id: 'tpl-sell-holding',
+    label: '보유자산 매각',
+    type: 'transfer',
+    name: '보유자산 매각',
+    transferKind: 'investment',
+    sellPercentage: 100,
   },
 
   // 대출
