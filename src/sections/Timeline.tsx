@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { FinEvent, Scenario, YearMonth } from '../types';
+import type { FinEvent, MonthlyResult, Scenario, YearMonth } from '../types';
 import { useDashboardStore } from '../store/store';
 import { useSimulation } from '../lib/useSimulation';
 import { resolveOccurrence } from '../engine/engine';
@@ -28,18 +28,26 @@ interface MonthEntry {
   skipped: boolean;
 }
 
-function eventsForMonth(events: FinEvent[], month: YearMonth): MonthEntry[] {
+function eventsForMonth(events: FinEvent[], month: YearMonth, monthResult: MonthlyResult | undefined): MonthEntry[] {
+  // Prefer the exact amount the engine actually moved this month (from the ledger) over a
+  // recomputed guess — this matters for %-based sells, whose real amount depends on the
+  // bucket's live balance and isn't just the event's static `amount` field.
+  function ledgerAmount(eventId: string): number | undefined {
+    const line = monthResult?.events.find((e) => e.eventId === eventId);
+    return line ? Math.abs(line.amount) : undefined;
+  }
+
   const out: MonthEntry[] = [];
   for (const event of events) {
     if (!event.recurrence) {
       if (event.month === month) {
-        out.push({ event, amount: event.amount, skipped: false });
+        out.push({ event, amount: ledgerAmount(event.id) ?? event.amount, skipped: false });
       }
       continue;
     }
     const occ = resolveOccurrence(event, month);
     if (occ.active) {
-      out.push({ event, amount: occ.amount, skipped: false });
+      out.push({ event, amount: ledgerAmount(event.id) ?? occ.amount, skipped: false });
     } else if (!event.active && event.recurrence.startMonth === month) {
       out.push({ event, amount: event.amount, skipped: false });
     } else if (event.active && event.recurrence.exceptions?.[month]?.active === false) {
@@ -125,15 +133,14 @@ export default function Timeline({ scenario }: { scenario: Scenario }) {
 
       <div className="space-y-3">
         {months.map((month, monthIdx) => {
-          const allEntries = eventsForMonth(scenario.events, month);
+          const result = resultByMonth.get(month);
+          const allEntries = eventsForMonth(scenario.events, month, result);
           const query = search.trim().toLowerCase();
           const entries = allEntries.filter(
             (e) => matchesFilter(e, filter) && (query === '' || e.event.name.toLowerCase().includes(query)),
           );
 
           if (isFiltering && entries.length === 0) return null;
-
-          const result = resultByMonth.get(month);
           // near-term months expand by default; further-out months start collapsed to keep a 36-month timeline manageable.
           // an active filter/search always auto-expands months with matches, since a collapsed match would be invisible.
           const isCollapsed = isFiltering ? false : (collapsed[month] ?? (allEntries.length === 0 || monthIdx >= 6));

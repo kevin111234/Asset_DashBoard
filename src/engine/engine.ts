@@ -134,13 +134,21 @@ export function simulateScenario(scenario: Scenario): SimulationResult {
         totalExpense += occ.amount;
         ledger.push({ label: event.name, amount: -occ.amount, kind: 'expense', eventId: event.id });
       } else if (event.type === 'transfer' && event.transfer) {
-        bucketBalances[event.transfer.from] -= occ.amount;
-        bucketBalances[event.transfer.to] += occ.amount;
-        if (event.transfer.to === 'cash') assetTransferNet += occ.amount;
-        if (event.transfer.from === 'cash') assetTransferNet -= occ.amount;
-        if (event.transfer.kind === 'saving') savingsMove += occ.amount;
-        else if (event.transfer.kind === 'investment') investmentMove += occ.amount;
-        ledger.push({ label: event.name, amount: -occ.amount, kind: 'transfer', eventId: event.id });
+        // a %-based sell always draws on the bucket's *actual* balance at
+        // execution time, ignoring the event's static amount — so "전체 매도"
+        // stays correct no matter how much the position has grown or shrunk.
+        const pct = event.transfer.sellPercentage;
+        const transferAmount =
+          pct !== undefined
+            ? Math.round(bucketBalances[event.transfer.from] * (Math.max(0, Math.min(100, pct)) / 100))
+            : occ.amount;
+        bucketBalances[event.transfer.from] -= transferAmount;
+        bucketBalances[event.transfer.to] += transferAmount;
+        if (event.transfer.to === 'cash') assetTransferNet += transferAmount;
+        if (event.transfer.from === 'cash') assetTransferNet -= transferAmount;
+        if (event.transfer.kind === 'saving') savingsMove += transferAmount;
+        else if (event.transfer.kind === 'investment') investmentMove += transferAmount;
+        ledger.push({ label: event.name, amount: -transferAmount, kind: 'transfer', eventId: event.id });
       }
     }
 
